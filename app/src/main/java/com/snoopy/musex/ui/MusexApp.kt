@@ -23,7 +23,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.PlaylistPlay
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
@@ -113,6 +115,8 @@ fun MusexApp(
     var showCreatePlaylist by rememberSaveable { mutableStateOf(false) }
     var showCarMode by rememberSaveable { mutableStateOf(false) }
     var sharedSeed by remember { mutableStateOf("") }
+    var selectedSong by remember { mutableStateOf<SongEntity?>(null) }
+    var selectedPlaylistId by rememberSaveable { mutableStateOf<String?>(null) }
 
     LaunchedEffect(incomingShare) {
         incomingShare?.let {
@@ -134,6 +138,22 @@ fun MusexApp(
             onPlayed = model::recordPlay,
         )
         return
+    }
+
+    selectedPlaylistId?.let { playlistId ->
+        val playlist = playlists.firstOrNull { it.id == playlistId }
+        val playlistFlow = remember(playlistId) { model.playlistSongs(playlistId) }
+        val playlistSongs by playlistFlow.collectAsState()
+        PlaylistDetailScreen(
+            playlist = playlist,
+            songs = playlistSongs,
+            onBack = { selectedPlaylistId = null },
+            onFavorite = model::toggleFavorite,
+            onPlayed = model::recordPlay,
+            onEdit = { selectedSong = it },
+            onRemove = { model.removeFromPlaylist(playlistId, it) },
+        )
+        if (selectedSong == null) return
     }
 
     Scaffold(
@@ -166,9 +186,9 @@ fun MusexApp(
     ) { padding ->
         when (destination) {
             Destination.Home -> HomeScreen(songs, favorites, recentlyPlayed, playlists, { showCarMode = true }, model::recordPlay, padding)
-            Destination.Library -> LibraryScreen(songs, model::toggleFavorite, model::recordPlay, padding)
-            Destination.Search -> SearchScreen(query, { model.query.value = it }, searchResults, model::toggleFavorite, model::recordPlay, padding)
-            Destination.Playlists -> PlaylistsScreen(playlists, padding)
+            Destination.Library -> LibraryScreen(songs, model::toggleFavorite, model::recordPlay, { selectedSong = it }, padding)
+            Destination.Search -> SearchScreen(query, { model.query.value = it }, searchResults, model::toggleFavorite, model::recordPlay, { selectedSong = it }, padding)
+            Destination.Playlists -> PlaylistsScreen(playlists, { selectedPlaylistId = it }, padding)
             Destination.Settings -> SettingsScreen(padding)
         }
     }
@@ -185,6 +205,17 @@ fun MusexApp(
         CreatePlaylistDialog(
             onDismiss = { showCreatePlaylist = false },
             onCreate = { name, description -> model.createPlaylist(name, description) { showCreatePlaylist = false } },
+        )
+    }
+    selectedSong?.let { song ->
+        EditSongDialog(
+            song = song,
+            playlists = playlists,
+            loadMemberships = { callback -> model.loadMemberships(song.id, callback) },
+            onDismiss = { selectedSong = null },
+            onSave = { title, artist, note, memberships ->
+                model.updateSong(song.id, title, artist, note, memberships) { selectedSong = null }
+            },
         )
     }
 }
@@ -237,11 +268,26 @@ private fun LibraryScreen(
     songs: List<SongEntity>,
     onFavorite: (String) -> Unit,
     onPlayed: (String) -> Unit,
+    onEdit: (SongEntity) -> Unit,
     padding: PaddingValues,
 ) = ScreenFrame("Library", "All songs · local and available offline", padding) {
-    if (songs.isEmpty()) EmptyState("Your library is empty", "Add a YouTube or YouTube Music video link. It will be saved immediately, even before metadata is available.")
+    var sort by rememberSaveable { mutableStateOf("Recently added") }
+    val sorted = when (sort) {
+        "Song A–Z" -> songs.sortedBy { it.displayTitle.lowercase() }
+        "Artist A–Z" -> songs.sortedBy { it.displayArtist.lowercase() }
+        "Recently played" -> songs.sortedByDescending { it.lastPlayedAt ?: Long.MIN_VALUE }
+        "Most played" -> songs.sortedByDescending { it.playCount }
+        else -> songs
+    }
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(listOf("Recently added", "Song A–Z", "Artist A–Z", "Recently played", "Most played")) { option ->
+            AssistChip(onClick = { sort = option }, label = { Text(option) })
+        }
+    }
+    Spacer(Modifier.height(12.dp))
+    if (sorted.isEmpty()) EmptyState("Your library is empty", "Add a YouTube or YouTube Music video link. It will be saved immediately, even before metadata is available.")
     else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 100.dp)) {
-        items(songs, key = { it.id }) { SongRow(it, onFavorite, onPlayed) }
+        items(sorted, key = { it.id }) { SongRow(it, onFavorite, onPlayed, onEdit = { onEdit(it) }) }
     }
 }
 
@@ -252,6 +298,7 @@ private fun SearchScreen(
     results: List<SongEntity>,
     onFavorite: (String) -> Unit,
     onPlayed: (String) -> Unit,
+    onEdit: (SongEntity) -> Unit,
     padding: PaddingValues,
 ) = ScreenFrame("Search", "Songs · Artists · Playlists · Tags · Memory Notes", padding) {
     OutlinedTextField(value = query, onValueChange = onQuery, modifier = Modifier.fillMaxWidth(), leadingIcon = { Icon(Icons.Default.Search, null) }, label = { Text("Search your library") }, singleLine = true)
@@ -261,16 +308,16 @@ private fun SearchScreen(
     Spacer(Modifier.height(14.dp))
     if (results.isEmpty()) EmptyLine(if (query.isBlank()) "Start typing to browse your local library." else "No literal Thai/English matches found.")
     else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
-        items(results, key = { it.id }) { SongRow(it, onFavorite, onPlayed) }
+        items(results, key = { it.id }) { SongRow(it, onFavorite, onPlayed, onEdit = { onEdit(it) }) }
     }
 }
 
 @Composable
-private fun PlaylistsScreen(playlists: List<PlaylistSummary>, padding: PaddingValues) =
+private fun PlaylistsScreen(playlists: List<PlaylistSummary>, onSelect: (String) -> Unit, padding: PaddingValues) =
     ScreenFrame("Playlists", "Manual and smart collections", padding) {
         if (playlists.isEmpty()) EmptyState("No playlists yet", "Use + to create a manual playlist. Smart rules and YouTube sync arrive in later phases.")
         else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(bottom = 90.dp)) {
-            items(playlists, key = { it.id }) { PlaylistRow(it) }
+            items(playlists, key = { it.id }) { PlaylistRow(it, onClick = { onSelect(it.id) }) }
         }
     }
 
@@ -288,9 +335,19 @@ private fun SettingsScreen(padding: PaddingValues) = ScreenFrame("Settings", "Co
 }
 
 @Composable
-private fun SongRow(song: SongEntity, onFavorite: (String) -> Unit, onPlayed: (String) -> Unit) {
+private fun SongRow(
+    song: SongEntity,
+    onFavorite: (String) -> Unit,
+    onPlayed: (String) -> Unit,
+    onEdit: (() -> Unit)? = null,
+    onRemove: (() -> Unit)? = null,
+) {
     val context = LocalContext.current
-    Card(colors = CardDefaults.cardColors(containerColor = Navy900), shape = RoundedCornerShape(16.dp)) {
+    Card(
+        modifier = if (onEdit != null) Modifier.clickable(onClick = onEdit) else Modifier,
+        colors = CardDefaults.cardColors(containerColor = Navy900),
+        shape = RoundedCornerShape(16.dp),
+    ) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             CoverPlaceholder(song.displayTitle, Modifier.size(66.dp))
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
@@ -302,6 +359,7 @@ private fun SongRow(song: SongEntity, onFavorite: (String) -> Unit, onPlayed: (S
                 }
             }
             IconButton(onClick = { onFavorite(song.id) }) { Icon(if (song.favorite) Icons.Default.Favorite else Icons.Default.FavoriteBorder, "Favorite", tint = if (song.favorite) Blue400 else MaterialTheme.colorScheme.onSurfaceVariant) }
+            onRemove?.let { remove -> IconButton(onClick = remove) { Icon(Icons.Default.DeleteOutline, "Remove from playlist") } }
             IconButton(onClick = { openSong(context, song, onPlayed) }) { Icon(Icons.Default.PlayArrow, "Open in YouTube") }
         }
     }
@@ -349,8 +407,8 @@ private fun EmptyState(title: String, description: String) {
 }
 
 @Composable
-private fun PlaylistRow(playlist: PlaylistSummary) {
-    Card(colors = CardDefaults.cardColors(containerColor = Navy900), shape = RoundedCornerShape(16.dp)) {
+private fun PlaylistRow(playlist: PlaylistSummary, onClick: (() -> Unit)? = null) {
+    Card(modifier = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier, colors = CardDefaults.cardColors(containerColor = Navy900), shape = RoundedCornerShape(16.dp)) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             CoverPlaceholder(playlist.name, Modifier.size(58.dp))
             Column(Modifier.padding(start = 14.dp).weight(1f)) {
@@ -441,6 +499,78 @@ private fun CreatePlaylistDialog(onDismiss: () -> Unit, onCreate: (String, Strin
         confirmButton = { Button(enabled = name.isNotBlank(), onClick = { onCreate(name, description) }) { Text("Create") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+@Composable
+private fun EditSongDialog(
+    song: SongEntity,
+    playlists: List<PlaylistSummary>,
+    loadMemberships: ((Set<String>) -> Unit) -> Unit,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, Set<String>) -> Unit,
+) {
+    var title by remember(song.id) { mutableStateOf(song.titleOverride.orEmpty()) }
+    var artist by remember(song.id) { mutableStateOf(song.artistOverride.orEmpty()) }
+    var note by remember(song.id) { mutableStateOf(song.memoryNote) }
+    var selected by remember(song.id) { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(song.id) { loadMemberships { selected = it } }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Song details") },
+        text = {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(9.dp)) {
+                item {
+                    Text("Original video ID: ${song.youtubeVideoId}", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium)
+                    if (song.providerTitle != null) Text("Provider: ${song.providerTitle}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                item { OutlinedTextField(title, { title = it }, Modifier.fillMaxWidth(), label = { Text("Local title") }, supportingText = { Text("Leave blank to use provider title") }) }
+                item { OutlinedTextField(artist, { artist = it }, Modifier.fillMaxWidth(), label = { Text("Local artist") }, supportingText = { Text("You can correct an inferred artist here") }) }
+                item { OutlinedTextField(note, { note = it }, Modifier.fillMaxWidth(), label = { Text("Memory Note") }, minLines = 2) }
+                if (playlists.isNotEmpty()) item { Text("Playlist memberships", fontWeight = FontWeight.Bold) }
+                items(playlists, key = { it.id }) { playlist ->
+                    Row(Modifier.fillMaxWidth().clickable { selected = if (playlist.id in selected) selected - playlist.id else selected + playlist.id }, verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(playlist.id in selected, { checked -> selected = if (checked) selected + playlist.id else selected - playlist.id })
+                        Text(playlist.name)
+                    }
+                }
+                item { Text("Play count ${song.playCount} · สถิตินี้นับการกดเปิด ไม่ใช่เวลาที่ฟังจริง", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelMedium) }
+            }
+        },
+        confirmButton = { Button(onClick = { onSave(title, artist, note, selected) }) { Text("Save changes") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
+}
+
+@Composable
+private fun PlaylistDetailScreen(
+    playlist: PlaylistSummary?,
+    songs: List<SongEntity>,
+    onBack: () -> Unit,
+    onFavorite: (String) -> Unit,
+    onPlayed: (String) -> Unit,
+    onEdit: (SongEntity) -> Unit,
+    onRemove: (String) -> Unit,
+) {
+    Scaffold(topBar = {
+        Row(Modifier.fillMaxWidth().background(Navy900).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            Column(Modifier.weight(1f)) {
+                Text(playlist?.name ?: "Playlist", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("${songs.size} songs · Not linked", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(18.dp)) {
+            if (!playlist?.description.isNullOrBlank()) Text(playlist?.description.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
+            if (songs.isEmpty()) EmptyState("This playlist is empty", "Edit a song from Library and select this playlist, or choose it while using Quick Add.")
+            else LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(songs, key = { it.id }) { song ->
+                    SongRow(song, onFavorite, onPlayed, onEdit = { onEdit(song) }, onRemove = { onRemove(song.id) })
+                }
+            }
+        }
+    }
 }
 
 @Composable

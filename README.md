@@ -10,12 +10,19 @@ Musex is a native Android, local-first personal music library for remembering an
 - One song per YouTube video ID, regardless of supported URL variant.
 - Local title/artist overrides, Memory Note, Favorite, Last Played and Play Count.
 - Manual playlist creation and multi-playlist assignment from Quick Add.
+- Playlist detail with safe membership removal (the Song remains in Library).
+- Local title/artist/Memory Note editing and playlist membership editing.
+- Library views for Recently Added, Song A–Z, Artist A–Z, Recently Played and Most Played.
 - `ACTION_SEND` text sharing into the Quick Add dialog.
 - Literal Thai/English search across local title, artist, notes and tags.
 - Car Mode foundation with simplified large controls.
 - Explicit `Pending` metadata and `Not configured` YouTube states; no fabricated provider success.
 
-Provider metadata jobs, thumbnails, custom covers, smart playlist rules, Google authorization/import/sync, backup/restore and final embedded-player feasibility are intentionally tracked as later phases from the product specification. A visible button is not used to claim those integrations are complete.
+Provider metadata jobs, thumbnails, custom covers, smart playlist rules, Google authorization/import/sync, backup/restore and final embedded-player feasibility require further implementation and, where applicable, real Google/OAuth configuration. A visible button is not used to claim those integrations are complete.
+
+## Device smoke test
+
+Tested on 4 October 2026 using a Samsung SM-A156E running Android 16 / API 36 at 1080×2340. Installation, cold launch, playlist creation, share Quick Add, process-death persistence, URL-variant dedupe, playlist membership display, local-title editing and local search passed. No AndroidRuntime fatal entry was present in the captured post-test log window. See [`docs/DEVICE_QA.md`](docs/DEVICE_QA.md).
 
 ## Build
 
@@ -55,4 +62,3 @@ Official references reviewed for this baseline:
 ## Data and backup policy
 
 The current database is local and excluded from Android Auto Backup until the versioned `.musex` export/restore path is implemented. The planned archive contains `manifest.json`, `library.json`, and uploaded covers. It excludes OAuth tokens, passwords, audio and thumbnail cache.
-

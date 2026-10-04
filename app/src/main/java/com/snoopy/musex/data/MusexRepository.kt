@@ -25,6 +25,7 @@ class MusexRepository(private val database: MusexDatabase) {
     val playlists: Flow<List<PlaylistSummary>> = dao.observePlaylists()
 
     fun search(query: String) = dao.searchSongs(query.trim())
+    fun playlistSongs(playlistId: String) = dao.observePlaylistSongs(playlistId)
 
     suspend fun addSong(request: AddSongRequest): AddSongResult = database.withTransaction {
         val reference = YouTubeUrlParser.parse(request.sharedText)
@@ -73,4 +74,17 @@ class MusexRepository(private val database: MusexDatabase) {
 
     suspend fun toggleFavorite(songId: String) = dao.toggleFavorite(songId, System.currentTimeMillis())
     suspend fun recordPlay(songId: String) = dao.recordPlay(songId, System.currentTimeMillis())
+
+    suspend fun updateSong(songId: String, title: String, artist: String, note: String, playlistIds: Set<String>) = database.withTransaction {
+        val now = System.currentTimeMillis()
+        dao.updateLocalFields(songId, title.trim().ifBlank { null }, artist.trim().ifBlank { null }, note.trim(), now)
+        val current = dao.membershipIds(songId).toSet()
+        (playlistIds - current).forEach { playlistId ->
+            dao.insertMembership(PlaylistSongEntity(playlistId, songId, dao.nextPosition(playlistId), now))
+        }
+        (current - playlistIds).forEach { playlistId -> dao.removeMembership(playlistId, songId) }
+    }
+
+    suspend fun memberships(songId: String): Set<String> = dao.membershipIds(songId).toSet()
+    suspend fun removeFromPlaylist(playlistId: String, songId: String) = dao.removeMembership(playlistId, songId)
 }

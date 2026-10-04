@@ -44,6 +44,24 @@ class MusexViewModel(private val repository: MusexRepository) : ViewModel() {
     }
     fun clearMessage() { message.value = null }
 
+    fun playlistSongs(playlistId: String) = repository.playlistSongs(playlistId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    fun loadMemberships(songId: String, onLoaded: (Set<String>) -> Unit) = viewModelScope.launch {
+        onLoaded(repository.memberships(songId))
+    }
+
+    fun updateSong(songId: String, title: String, artist: String, note: String, playlistIds: Set<String>, onDone: () -> Unit) = viewModelScope.launch {
+        runCatching { repository.updateSong(songId, title, artist, note, playlistIds) }
+            .onSuccess { message.value = "Song details updated"; onDone() }
+            .onFailure { message.value = it.message ?: "Could not update song" }
+    }
+
+    fun removeFromPlaylist(playlistId: String, songId: String) = viewModelScope.launch {
+        repository.removeFromPlaylist(playlistId, songId)
+        message.value = "Removed from playlist — song kept in Library"
+    }
+
     class Factory(private val repository: MusexRepository) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T = MusexViewModel(repository) as T

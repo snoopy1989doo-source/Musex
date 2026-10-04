@@ -19,6 +19,14 @@ interface MusexDao {
     @Query("SELECT * FROM songs WHERE lastPlayedAt IS NOT NULL ORDER BY lastPlayedAt DESC LIMIT :limit")
     fun observeRecentlyPlayed(limit: Int = 12): Flow<List<SongEntity>>
 
+    @Query("""
+        SELECT s.* FROM songs s
+        INNER JOIN playlist_songs ps ON ps.songId = s.id
+        WHERE ps.playlistId = :playlistId
+        ORDER BY ps.customPosition ASC
+    """)
+    fun observePlaylistSongs(playlistId: String): Flow<List<SongEntity>>
+
     @Query("SELECT * FROM songs WHERE youtubeVideoId = :videoId LIMIT 1")
     suspend fun songByVideoId(videoId: String): SongEntity?
 
@@ -35,6 +43,12 @@ interface MusexDao {
 
     @Query("UPDATE songs SET playCount = playCount + 1, lastPlayedAt = :now, updatedAt = :now WHERE id = :id")
     suspend fun recordPlay(id: String, now: Long)
+
+    @Query("""
+        UPDATE songs SET titleOverride = :title, artistOverride = :artist,
+        memoryNote = :note, updatedAt = :now WHERE id = :id
+    """)
+    suspend fun updateLocalFields(id: String, title: String?, artist: String?, note: String, now: Long)
 
     @Query("""
         SELECT DISTINCT s.* FROM songs s
@@ -71,6 +85,9 @@ interface MusexDao {
     @Query("DELETE FROM playlist_songs WHERE playlistId = :playlistId AND songId = :songId")
     suspend fun removeMembership(playlistId: String, songId: String)
 
+    @Query("SELECT playlistId FROM playlist_songs WHERE songId = :songId")
+    suspend fun membershipIds(songId: String): List<String>
+
     @Query("SELECT * FROM tags WHERE normalizedName = :normalized LIMIT 1")
     suspend fun tagByNormalizedName(normalized: String): TagEntity?
 
@@ -89,4 +106,3 @@ interface MusexDao {
         removeMembership(fromPlaylistId, songId)
     }
 }
-
